@@ -4,7 +4,7 @@ from datasets.dataloader_sample import *
 from sklearn.model_selection import train_test_split
 
 
-class getter_dataloader(object):
+class dataloader_getter(object):
     """
     Select dataset,
 

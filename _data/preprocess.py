@@ -19,11 +19,14 @@ parser.add_argument('--dataset', default='sample', help='dataset name: diginetic
 opt = parser.parse_args()
 print(opt)
 
-dataset = 'sample_train-item-views.csv'
-if opt.dataset == 'diginetica':
+if opt.dataset == 'sample':
+    dataset = 'sample/sample_train-item-views.csv'
+elif opt.dataset == 'diginetica':
     dataset = 'train-item-views.csv'
 elif opt.dataset =='yoochoose':
     dataset = 'yoochoose-clicks.dat'
+else:
+    raise RuntimeError('Dataset '+opt.dataset+' not found !')
 
 print("-- Starting @ %ss" % datetime.datetime.now())
 with open(dataset, "r") as f:

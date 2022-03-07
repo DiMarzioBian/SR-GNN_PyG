@@ -1,72 +1,65 @@
+from abc import ABC
 from argparse import Namespace
+from typing import Union, List, Tuple
+
 import numpy as np
-import networkx as nx
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch_geometric.data import Data, Dataset, DataLoader
 
 
-class SampleData(Dataset):
-    """ Sample dataset. """
-    def __init__(self, data, shuffle=False, graph=None):
-        self.index_mask = 0
-        self.all_seq, self.mask, self.len_max = self.get_data_mask(data[0])
-        self.gt = np.asarray(data[1])
-        self.length = len(self.all_seq)
-        self.shuffle = shuffle
-        self.graph = graph
+class MultiSessionsGraph(Dataset):
+    """Every session is a graph."""
 
-    def __len__(self):
-        return self.length
+    def __init__(self, f, transform=None, pre_transform=None):
+        """
+        Args:
+            f: pickle loaded file
+            phrase: 'train' or 'test'
+        """
+        self.f = f
+        super(MultiSessionsGraph, self).__init__(f, transform, pre_transform)
+        self.data, self.slices = torch.load(self.processed_paths[0])
 
-    def __getitem__(self, index):
-        return self.all_seq[index], self.mask[index], self.gt[index]
+    @property
+    def raw_file_names(self) -> Union[str, List[str], Tuple]:
+        pass
 
-    def get_data_mask(self, all_seq):
-        """ Generate masked user sequences"""
-        lens_all_seq = [len(seq) for seq in all_seq]
-        len_max = max(lens_all_seq)
-        all_seq_masked = [seq + [self.index_mask] * (len_max - len_seq) for seq, len_seq in zip(all_seq, lens_all_seq)]
-        mask_all_seq = [[1] * len_seq + [self.index_mask] * (len_max - len_seq) for len_seq in lens_all_seq]
-        return np.asarray(all_seq_masked), np.asarray(mask_all_seq), len_max
+    @property
+    def processed_file_names(self) -> Union[str, List[str], Tuple]:
+        pass
 
+    def len(self) -> int:
+        pass
 
-def collate_fn(insts):
-    """ Collate function, as required by PyTorch. """
-    seq_batch, mask_batch, gt_batch = list(zip(*insts))
+    def get(self, idx: int) -> Data:
+        pass
 
-    max_num_item_seq = np.max([len(np.unique(seq)) for seq in seq_batch])
-    seq_alias_batch, items_batch, A_batch = [], [], []
-    for seq in seq_batch:
-        items_seq = np.unique(seq)
-        items_batch.append(items_seq.tolist() + (max_num_item_seq - len(items_seq)) * [0])
-        A_seq = np.zeros((max_num_item_seq, max_num_item_seq))  # Adjacency matrix for sequential
-        for i in np.arange(len(seq) - 1):
-            # For edges, seq[i] is in, and seq[i+1] is out
-            if seq[i + 1] == 0:
-                break
-            in_index = np.where(items_seq == seq[i])[0][0]
-            out_index = np.where(items_seq == seq[i + 1])[0][0]
-            A_seq[in_index][out_index] = 1
+    def download(self):
+        pass
 
-        A_seq_in_sum = np.sum(A_seq, 0)
-        A_seq_in_sum[np.where(A_seq_in_sum == 0)] = 1  # Add 1 for all nodes with 0 indegree
-        A_seq_in = np.divide(A_seq, A_seq_in_sum)
+    def process(self):
+        data_list = []
+        for sequences, y in zip(self.f[0], self.f[1]):
+            i = 0
+            nodes = {}  # dict{15: 0, 16: 1, 18: 2, ...}
+            senders = []
+            x = []
+            for node in sequences:
+                if node not in nodes:
+                    nodes[node] = i
+                    x.append([node])
+                    i += 1
+                senders.append(nodes[node])
+            receivers = senders[:]
+            del senders[-1]  # the last item is a receiver
+            del receivers[0]  # the first item is a sender
+            edge_index = torch.tensor([senders, receivers], dtype=torch.long)
+            x = torch.tensor(x, dtype=torch.long)
+            y = torch.tensor([y], dtype=torch.long)
+            data_list.append(Data(x=x, edge_index=edge_index, y=y))
 
-        A_seq_out_sum = np.sum(A_seq, 1)
-        A_seq_out_sum[np.where(A_seq_out_sum == 0)] = 1
-        A_seq_out = np.divide(A_seq.transpose(), A_seq_out_sum)
-
-        A_seq = np.concatenate([A_seq_in, A_seq_out]).transpose()
-        A_batch.append(A_seq)
-        seq_alias_batch.append([np.where(items_seq == i)[0][0] for i in seq])
-
-    A_batch = torch.FloatTensor(np.array(A_batch))
-    items_batch = torch.LongTensor(np.array(items_batch))
-    seq_alias_batch = torch.LongTensor(np.array(seq_alias_batch))
-    mask_batch = torch.LongTensor(np.array(mask_batch))
-    gt_batch = torch.LongTensor(gt_batch)
-
-    return A_batch, items_batch, seq_alias_batch, mask_batch, gt_batch
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
 
 
 def get_sample_dataloader(opt: Namespace,
@@ -76,15 +69,14 @@ def get_sample_dataloader(opt: Namespace,
     """ Load data and prepare dataloader. """
 
     # Instancelize dataloader
-    train_loader = DataLoader(SampleData(train_data), batch_size=opt.batch_size, num_workers=opt.num_workers,
-                              collate_fn=collate_fn, shuffle=True)
-    test_loader = DataLoader(SampleData(test_data), batch_size=opt.batch_size, num_workers=opt.num_workers,
-                             collate_fn=collate_fn, shuffle=False)
-
+    train_loader = DataLoader(MultiSessionsGraph(train_data), batch_size=opt.batch_size,
+                              num_workers=opt.num_workers, shuffle=True)
+    test_loader = DataLoader(MultiSessionsGraph(test_data), batch_size=opt.batch_size,
+                             num_workers=opt.num_workers, shuffle=False)
     # Validation set
     if opt.val_split_rate > 0:
-        valid_loader = DataLoader(SampleData(valid_data), batch_size=opt.batch_size, num_workers=opt.num_workers,
-                                  collate_fn=collate_fn, shuffle=False)
+        valid_loader = DataLoader(MultiSessionsGraph(valid_data), batch_size=opt.batch_size,
+                                  num_workers=opt.num_workers, shuffle=False)
     else:
         valid_loader = test_loader
 

@@ -6,7 +6,7 @@ import copy
 import torch
 import torch.nn as nn
 from model.sr_gnn import SR_GNN
-from datasets import getter_dataloader
+from datasets import dataloader_getter
 from epoch import run_epoch
 from utils import Noter
 
@@ -37,7 +37,7 @@ def main():
 
     # Settings need to be tuned
     parser.add_argument('--dataset', default='sample')
-    parser.add_argument('--step', type=int, default=1, help='Layer of GNN')
+    parser.add_argument('--layer_gnn', type=int, default=1, help='Layer of GNN')
     parser.add_argument('--val_split_rate', type=float, default=0.0)
     parser.add_argument('--k_metric', type=int, default=20)
 
@@ -68,7 +68,7 @@ def main():
     noter = Noter(opt)
 
     # Import data
-    data_getter = getter_dataloader(opt)
+    data_getter = dataloader_getter(opt)
 
     # Load data
     print('\n[Info] Loading data...')

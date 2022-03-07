@@ -4,38 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-class GGNN(nn.Module):
-    # Gated Graph Neural Network
-    def __init__(self, hidden_size, step=1):
-        super(GGNN, self).__init__()
-        self.step = step
-        self.hidden_size = hidden_size
-
-        self.fc_edge_in = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
-        self.fc_edge_out = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
-
-        self.fc_rzh_input = nn.Linear(2 * self.hidden_size, 3 * self.hidden_size, bias=True)
-        self.fc_rz_old = nn.Linear(1 * self.hidden_size, 2 * self.hidden_size, bias=True)
-        self.fc_h_old = nn.Linear(1 * self.hidden_size, 1 * self.hidden_size, bias=True)
-
-    def aggregate(self, A, emb_items):
-        h_input_in = self.fc_edge_in(torch.matmul(A[:, :, :A.shape[1]], emb_items))
-        h_input_out = self.fc_edge_out(torch.matmul(A[:, :, A.shape[1]: 2 * A.shape[1]], emb_items))
-        h_inputs = torch.cat([h_input_in, h_input_out], 2)
-
-        r_input, z_input, h_input = self.fc_rzh_input(h_inputs).chunk(chunks=3, dim=2)
-        r_old, z_old = self.fc_rz_old(emb_items).chunk(chunks=2, dim=2)
-
-        reset = torch.sigmoid(r_old + r_input)
-        update = torch.sigmoid(z_old + z_input)
-        h = torch.tanh(h_input + self.fc_h_old(reset * emb_items))
-        return (1 - update) * emb_items + update * h
-
-    def forward(self, A, h_item):
-        for i in range(self.step):
-            h_item = self.aggregate(A, h_item)
-        return h_item
+from torch_geometric.nn import GCNConv, GATConv, GatedGraphConv
 
 
 class SR_GNN(nn.Module):
@@ -50,7 +19,7 @@ class SR_GNN(nn.Module):
 
         # network
         self.embedding = nn.Embedding(self.num_item + 1, self.hidden_size)  # Add mask item (index = 0)
-        self.ggnn = GGNN(self.hidden_size, step=opt.step)
+        self.ggnn = GatedGraphConv(out_channels=self.hidden_size, num_layers=opt.layer_gnn)
         self.fc1 = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.fc2 = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.fc3 = nn.Linear(self.hidden_size, 1, bias=False)
@@ -65,7 +34,7 @@ class SR_GNN(nn.Module):
 
     def forward(self, A, items, seq_alias):
         num_sample = len(seq_alias)
-        h_items = self.ggnn(A, self.embedding(items))
+        h_items = self.ggnn(self.embedding(items), A)
         def embed_seq(i): return h_items[i][seq_alias[i]]
         h_seqs = torch.stack([embed_seq(i) for i in torch.arange(num_sample).long()])
         return h_seqs
