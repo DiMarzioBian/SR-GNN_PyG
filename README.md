@@ -7,4 +7,4 @@ Running on single GPU:
 python main.py
 ```
 ### Performance
-- To be evalutaed
+- To be evaluated
