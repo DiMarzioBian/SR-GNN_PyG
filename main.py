@@ -6,7 +6,7 @@ import copy
 import torch
 import torch.nn as nn
 from model.sr_gnn import SR_GNN
-from datasets import dataloader_getter
+from datasets import get_dataloader
 from epoch import run_epoch
 from utils import Noter
 
@@ -35,8 +35,9 @@ def main():
     parser.add_argument('--hawkes_graph', type=bool, default=False, help='Hawkes inference graph')
     parser.add_argument('--hawkes_embedding', type=bool, default=False, help='Hawkes embedding kernel')
 
-    # Settings need to be tuned
-    parser.add_argument('--dataset', default='sample')
+    # Settings
+    parser.add_argument('--benchmark', default='sample')
+    parser.add_argument('--in_memory', default=True, help='save graph in RAM')
     parser.add_argument('--layer_gnn', type=int, default=1, help='Layer of GNN')
     parser.add_argument('--val_split_rate', type=float, default=0.0)
     parser.add_argument('--k_metric', type=int, default=20)
@@ -51,28 +52,25 @@ def main():
         opt.state_dict_path = '_result/model/v' + opt.version + time.strftime("-%b_%d_%H_%M", time.localtime()) + '.pkl'
     opt.log = '_result/v' + opt.version + time.strftime("-%b_%d_%H_%M", time.localtime()) + '.txt'
 
-    if opt.dataset == 'diginetica':
+    if opt.benchmark == 'diginetica':
         opt.num_item = 43097
-    elif opt.dataset == 'yoochoose1_64' or opt.dataset == 'yoochoose1_4':
+    elif opt.benchmark == 'yoochoose1_64' or opt.benchmark == 'yoochoose1_4':
         opt.num_item = 37483
-    elif opt.dataset == 'sample':
+    elif opt.benchmark == 'sample':
         opt.num_item = 309
-    elif opt.dataset == 'tafeng':
+    elif opt.benchmark == 'tafeng':
         # Randomly sample 4000 users
         opt.num_item = 16272
     else:
-        raise RuntimeError('Dataset ', str(opt.data), ' not found.')
+        raise RuntimeError('Dataset ', str(opt.benchmark), ' not found.')
     assert opt.k_metric <= opt.num_item
 
     """ Start modeling """
     noter = Noter(opt)
 
-    # Import data
-    data_getter = dataloader_getter(opt)
-
     # Load data
     print('\n[Info] Loading data...')
-    trainloader, valloader, testloader = data_getter.get()
+    trainloader, valloader, testloader = get_dataloader(opt)
 
     # Load model
     model = SR_GNN(opt).to(opt.device)
